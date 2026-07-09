@@ -449,9 +449,8 @@ async function askClaude(imageB64) {
       system:
         'Sei un assistente che risponde a quesiti a risposta multipla. ' +
         'Ricevi una foto di una slide con una domanda e le opzioni di risposta. ' +
-        'Rispondi SOLO con la lettera dell\'opzione corretta seguita dal testo dell\'opzione, esempio: "B) Il nucleo atomico". ' +
-        'Nient\'altro. Nessuna spiegazione, nessun preambolo, nessuna frase aggiuntiva. ' +
-        'Solo la risposta corretta.',
+        'Rispondi SOLO con la lettera dell\'opzione corretta, esempio: "B". ' +
+        'Una sola lettera. Nient\'altro. Nessuna spiegazione, nessun testo aggiuntivo.',
       messages: [{
         role: 'user',
         content: [{
@@ -510,6 +509,20 @@ function setAnswer(text, placeholder) {
   const panel = document.getElementById('panel');
   panel.scrollTop = panel.scrollHeight;
 }
+
+// Auto-scan ogni 60 secondi
+let autoTimer = null;
+function startAutoScan() {
+  if (autoTimer) return;
+  autoTimer = setInterval(() => { capture(); }, 30000);
+}
+const overlayObserver = new MutationObserver(() => {
+  if (overlay.classList.contains('hidden')) {
+    startAutoScan();
+    overlayObserver.disconnect();
+  }
+});
+overlayObserver.observe(overlay, { attributes: true });
 
 // Spegni TTS quando si lascia la pagina
 document.addEventListener('visibilitychange', () => {
