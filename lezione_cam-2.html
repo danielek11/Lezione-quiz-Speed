@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Lens AI" />
+<title>Lens AI — Assistente Docente</title>
+<style>
+  /* ---------- token system ---------- */
+  :root {
+    --bg:        #0d0f14;
+    --surface:   #161a22;
+    --border:    #252b38;
+    --accent:    #3d7fff;
+    --accent-hi: #6fa0ff;
+    --danger:    #ff4d4d;
+    --text:      #e8ecf4;
+    --muted:     #5c6680;
+    --radius:    18px;
+    --font-ui:   'SF Pro Display', -apple-system, 'Helvetica Neue', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    height: 100%; width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ---------- layout ---------- */
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0)
+             env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+  }
+
+  /* ---------- header ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .logo {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: var(--text);
+  }
+  .logo span { color: var(--accent-hi); }
+
+  .status-pill {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 99px;
+    letter-spacing: 0.3px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    transition: all 0.3s;
+  }
+  .status-pill.active  { background: #1a2b1a; border-color: #2e5c2e; color: #6ddc6d; }
+  .status-pill.loading { background: #1a1f2b; border-color: #2e3d5c; color: var(--accent-hi); }
+  .status-pill.error   { background: #2b1a1a; border-color: #5c2e2e; color: var(--danger); }
+
+  /* ---------- viewfinder ---------- */
+  #viewfinder-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: #000;
+  }
+
+  video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* corner brackets */
+  .bracket {
+    position: absolute;
+    width: 28px; height: 28px;
+    border-color: rgba(63, 127, 255, 0.7);
+    border-style: solid;
+    pointer-events: none;
+  }
+  .bracket.tl { top: 18px; left: 18px; border-width: 2px 0 0 2px; border-radius: 4px 0 0 0; }
+  .bracket.tr { top: 18px; right: 18px; border-width: 2px 2px 0 0; border-radius: 0 4px 0 0; }
+  .bracket.bl { bottom: 18px; left: 18px; border-width: 0 0 2px 2px; border-radius: 0 0 0 4px; }
+  .bracket.br { bottom: 18px; right: 18px; border-width: 0 2px 2px 0; border-radius: 0 0 4px 0; }
+
+  /* scanning line */
+  #scan-line {
+    position: absolute;
+    left: 14px; right: 14px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    top: 0;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+  }
+  #scan-line.scanning {
+    opacity: 1;
+    animation: scanMove 1.4s ease-in-out infinite;
+  }
+  @keyframes scanMove {
+    0%   { top: 14px; }
+    50%  { top: calc(100% - 14px); }
+    100% { top: 14px; }
+  }
+
+  /* flash overlay on capture */
+  #flash {
+    position: absolute; inset: 0;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+  }
+  #flash.pop { animation: flashPop 0.2s ease-out; }
+  @keyframes flashPop { 0%{opacity:.45} 100%{opacity:0} }
+
+  /* ---------- answer panel ---------- */
+  #panel {
+    flex-shrink: 0;
+    max-height: 36vh;
+    overflow-y: auto;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 14px 20px;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #answer-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  #answer-text {
+    font-size: 16px;
+    line-height: 1.55;
+    color: var(--text);
+    white-space: pre-wrap;
+  }
+
+  #answer-text.placeholder {
+    color: var(--muted);
+    font-style: italic;
+    font-size: 14px;
+  }
+
+  /* ---------- bottom bar ---------- */
+  #bottombar {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    padding: 16px 24px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  /* shutter button */
+  #btn-capture {
+    width: 68px; height: 68px;
+    border-radius: 50%;
+    border: 3px solid var(--accent);
+    background: transparent;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.12s, background 0.12s;
+    position: relative;
+  }
+  #btn-capture:active { transform: scale(0.92); background: rgba(63,127,255,0.12); }
+  #btn-capture.loading {
+    border-color: var(--accent-hi);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  #btn-capture svg { width: 28px; height: 28px; }
+
+  /* icon buttons */
+  .icon-btn {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color 0.15s, background 0.15s;
+  }
+  .icon-btn:active { background: var(--border); }
+  .icon-btn.on { color: var(--accent-hi); border-color: var(--accent); }
+  .icon-btn svg { width: 20px; height: 20px; }
+
+  /* ---------- setup overlay ---------- */
+  #overlay {
+    position: fixed; inset: 0;
+    background: rgba(13,15,20,0.97);
+    z-index: 100;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 32px 24px;
+    gap: 16px;
+  }
+  #overlay.hidden { display: none; }
+
+  #overlay h1 {
+    font-size: 26px; font-weight: 800;
+    letter-spacing: -0.8px;
+    text-align: center;
+  }
+  #overlay h1 em { font-style: normal; color: var(--accent-hi); }
+
+  #overlay p {
+    font-size: 14px; color: var(--muted); text-align: center;
+    line-height: 1.6; max-width: 320px;
+  }
+
+  #key-input {
+    width: 100%; max-width: 340px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 15px; color: var(--text);
+    font-family: 'SF Mono', monospace;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  #key-input:focus { border-color: var(--accent); }
+  #key-input::placeholder { color: var(--muted); }
+
+  #btn-start {
+    width: 100%; max-width: 340px;
+    padding: 16px;
+    background: var(--accent);
+    border: none; border-radius: 12px;
+    font-size: 16px; font-weight: 700;
+    color: #fff; cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+    letter-spacing: -0.2px;
+  }
+  #btn-start:active { background: #2a5cd4; transform: scale(0.98); }
+
+  #overlay-err {
+    font-size: 13px;
+    color: var(--danger);
+    min-height: 18px;
+  }
+
+  canvas { display: none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">Lens<span>AI</span></div>
+    <div class="status-pill" id="status">In attesa</div>
+  </header>
+
+  <div id="viewfinder-wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="bracket tl"></div>
+    <div class="bracket tr"></div>
+    <div class="bracket bl"></div>
+    <div class="bracket br"></div>
+    <div id="scan-line"></div>
+    <div id="flash"></div>
+  </div>
+
+  <div id="panel">
+    <div id="answer-label">Risposta</div>
+    <div id="answer-text" class="placeholder">Inquadra la slide e premi il pulsante.</div>
+  </div>
+
+  <div id="bottombar">
+    <button class="icon-btn" id="btn-voice" title="Voce on/off" onclick="toggleVoice()">
+      <!-- speaker icon -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+      </svg>
+    </button>
+
+    <button id="btn-capture" onclick="capture()" title="Analizza slide">
+      <!-- camera shutter -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="4" fill="rgba(255,255,255,0.15)"/>
+        <path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4l-2-2H9z"/>
+      </svg>
+    </button>
+
+    <button class="icon-btn" id="btn-clear" title="Cancella risposta" onclick="clearAnswer()">
+      <!-- trash icon -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"/>
+        <path d="M19 6l-1 14H6L5 6"/>
+        <path d="M10 11v6M14 11v6"/>
+        <path d="M9 6V4h6v2"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<!-- Setup overlay -->
+<div id="overlay">
+  <h1>Lens<em>AI</em></h1>
+  <p>Assistente docente — inquadra la slide con la fotocamera, ottieni la risposta in cuffia.</p>
+  <input id="key-input" type="password" placeholder="Anthropic API Key (sk-ant-...)" autocomplete="off" autocorrect="off" spellcheck="false" />
+  <button id="btn-start" onclick="startApp()">Avvia →</button>
+  <div id="overlay-err"></div>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let apiKey       = '';
+let voiceEnabled = true;
+let busy         = false;
+const voices     = { it: null };
+
+// ─── DOM refs ─────────────────────────────────────────────────────────────────
+const video      = document.getElementById('video');
+const canvas     = document.getElementById('canvas');
+const ctx        = canvas.getContext('2d');
+const overlay    = document.getElementById('overlay');
+const statusEl   = document.getElementById('status');
+const answerEl   = document.getElementById('answer-text');
+const btnCapture = document.getElementById('btn-capture');
+const btnVoice   = document.getElementById('btn-voice');
+const scanLine   = document.getElementById('scan-line');
+const flash      = document.getElementById('flash');
+
+// ─── Setup / avvio ────────────────────────────────────────────────────────────
+async function startApp() {
+  const keyInput = document.getElementById('key-input');
+  const errEl    = document.getElementById('overlay-err');
+  const key      = keyInput.value.trim();
+
+  if (!key.startsWith('sk-')) {
+    errEl.textContent = 'Chiave non valida — deve iniziare con sk-ant-…';
+    return;
+  }
+  apiKey = key;
+  errEl.textContent = '';
+
+  // Avvia fotocamera
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+  } catch (e) {
+    errEl.textContent = 'Fotocamera non disponibile: ' + e.message;
+    return;
+  }
+
+  // Pre-carica voci TTS
+  loadVoices();
+  window.speechSynthesis.onvoiceschanged = loadVoices;
+
+  overlay.classList.add('hidden');
+  setStatus('Pronto', '');
+}
+
+function loadVoices() {
+  const all = window.speechSynthesis.getVoices();
+  voices.it = all.find(v => v.lang.startsWith('it')) || all[0] || null;
+}
+
+// ─── Cattura e analisi ────────────────────────────────────────────────────────
+async function capture() {
+  if (busy) return;
+  busy = true;
+
+  // Flash visivo
+  flash.classList.remove('pop');
+  void flash.offsetWidth;
+  flash.classList.add('pop');
+
+  // Snapshot dal video
+  canvas.width  = video.videoWidth  || 1280;
+  canvas.height = video.videoHeight || 720;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const b64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+
+  // UI → loading
+  btnCapture.classList.add('loading');
+  scanLine.classList.add('scanning');
+  setStatus('Analisi…', 'loading');
+  setAnswer('Lettura slide in corso…', true);
+
+  try {
+    const answer = await askClaude(b64);
+    setAnswer(answer, false);
+    setStatus('Pronto', 'active');
+
+    if (voiceEnabled && answer) speak(answer);
+  } catch (e) {
+    setAnswer('Errore: ' + e.message, true);
+    setStatus('Errore', 'error');
+  } finally {
+    busy = false;
+    btnCapture.classList.remove('loading');
+    scanLine.classList.remove('scanning');
+  }
+}
+
+// ─── Chiamata API Claude Vision ───────────────────────────────────────────────
+async function askClaude(imageB64) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 250,
+      system:
+        'Sei un assistente che risponde a quesiti a risposta multipla. ' +
+        'Ricevi una foto di una slide con una domanda e le opzioni di risposta. ' +
+        'Rispondi SOLO con la lettera dell\'opzione corretta seguita dal testo dell\'opzione, esempio: "B) Il nucleo atomico". ' +
+        'Nient\'altro. Nessuna spiegazione, nessun preambolo, nessuna frase aggiuntiva. ' +
+        'Solo la risposta corretta.',
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'image',
+          source: { type: 'base64', media_type: 'image/jpeg', data: imageB64 }
+        }, {
+          type: 'text',
+          text: 'Analizza questa slide e rispondi.'
+        }]
+      }]
+    })
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  return data.content.filter(b => b.type === 'text').map(b => b.text).join(' ').trim();
+}
+
+// ─── TTS nativa del browser (va in cuffia se è il device di output selezionato) ─
+function speak(text) {
+  window.speechSynthesis.cancel();
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.lang  = 'it-IT';
+  utt.rate  = 1.05;
+  utt.pitch = 1.0;
+  if (voices.it) utt.voice = voices.it;
+  window.speechSynthesis.speak(utt);
+}
+
+function toggleVoice() {
+  voiceEnabled = !voiceEnabled;
+  btnVoice.classList.toggle('on', voiceEnabled);
+  if (!voiceEnabled) window.speechSynthesis.cancel();
+}
+
+function clearAnswer() {
+  window.speechSynthesis.cancel();
+  setAnswer('Inquadra la slide e premi il pulsante.', true);
+  setStatus('Pronto', '');
+}
+
+// ─── UI helpers ───────────────────────────────────────────────────────────────
+function setStatus(text, state) {
+  statusEl.textContent = text;
+  statusEl.className   = 'status-pill' + (state ? ' ' + state : '');
+}
+
+function setAnswer(text, placeholder) {
+  answerEl.textContent = text;
+  answerEl.className   = placeholder ? 'placeholder' : '';
+  // Scroll al fondo
+  const panel = document.getElementById('panel');
+  panel.scrollTop = panel.scrollHeight;
+}
+
+// Spegni TTS quando si lascia la pagina
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) window.speechSynthesis.cancel();
+});
+</script>
+</body>
+</html>
