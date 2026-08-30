@@ -448,10 +448,10 @@ async function askClaude(imageB64) {
       max_tokens: 250,
       system:
         'Sei un esperto di Matematica, Analisi 1 e Analisi 2 (limiti, derivate, integrali, serie, equazioni differenziali, funzioni reali). ' +
-        'Ricevi una foto di una slide con una domanda o quesito a risposta multipla. ' +
-        'Rispondi SOLO con la lettera dell\'opzione corretta, esempio: "B". ' +
-        'Una sola lettera, nient\'altro. ' +
-        'Se la domanda non ha opzioni ma richiede un risultato, scrivi solo il risultato numerico o simbolico, senza spiegazioni. ' +
+        'Ricevi una foto di una slide con una domanda o quesito a risposta multipla numerata. ' +
+        'Rispondi SOLO con il numero dell\'opzione corretta, esempio: "3". ' +
+        'Un solo numero, nient\'altro. Nessuna spiegazione, nessun testo aggiuntivo. ' +
+        'Se la domanda non ha opzioni numerate ma richiede un risultato, scrivi solo il risultato numerico o simbolico. ' +
         'Rispondi sempre in italiano. Sii netto e preciso.',
       messages: [{
         role: 'user',
