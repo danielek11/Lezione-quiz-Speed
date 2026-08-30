@@ -405,11 +405,13 @@ async function capture() {
   void flash.offsetWidth;
   flash.classList.add('pop');
 
-  // Snapshot dal video
+  // Snapshot normale 1x
   canvas.width  = video.videoWidth  || 1280;
   canvas.height = video.videoHeight || 720;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const b64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+  const b64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
 
   // UI → loading
   btnCapture.classList.add('loading');
@@ -418,10 +420,55 @@ async function capture() {
   setAnswer('Lettura slide in corso…', true);
 
   try {
-    const answer = await askClaude(b64);
+    let answer = await askClaude(b64);
+
+    // Tentativo 2: ritaglia ogni singola risposta e le manda tutte zoomate
+    if (!/^\d+$/.test(answer.trim())) {
+      setStatus('Zoomo su ogni singola risposta…', 'loading');
+      setAnswer('⚠️ Non riesco a leggere, zoomo su ogni risposta singolarmente…', true);
+
+      const vw = video.videoWidth  || 1280;
+      const vh = video.videoHeight || 720;
+
+      // Area risposte: metà inferiore della slide
+      const answerAreaStartY = Math.floor(vh * 0.35);
+      const answerAreaH      = vh - answerAreaStartY;
+
+      // Dividi in 4 strisce orizzontali (una per risposta)
+      const numOptions = 4;
+      const stripH     = Math.floor(answerAreaH / numOptions);
+      const scale      = 4; // zoom 4x su ogni singola risposta
+
+      const strips = [];
+      for (let i = 0; i < numOptions; i++) {
+        const stripCanvas = document.createElement('canvas');
+        stripCanvas.width  = vw * scale;
+        stripCanvas.height = stripH * scale;
+        const sCtx = stripCanvas.getContext('2d');
+        sCtx.imageSmoothingEnabled = true;
+        sCtx.imageSmoothingQuality = 'high';
+        const srcY = answerAreaStartY + i * stripH;
+        sCtx.drawImage(video, 0, srcY, vw, stripH, 0, 0, stripCanvas.width, stripCanvas.height);
+        strips.push(stripCanvas.toDataURL('image/jpeg', 0.95).split(',')[1]);
+      }
+
+      answer = await askClaudeMulti(b64, strips);
+    }
+
+    // Tentativo 3: zoom globale 2x
+    if (!/^\d+$/.test(answer.trim())) {
+      setStatus('Zoom globale…', 'loading');
+      setAnswer('⚠️ Ultimo tentativo con zoom globale…', true);
+      const scale = 2;
+      canvas.width  = (video.videoWidth  || 1280) * scale;
+      canvas.height = (video.videoHeight || 720)  * scale;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const b64zoom = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+      answer = await askClaude(b64zoom);
+    }
+
     setAnswer(answer, false);
     setStatus('Pronto', 'active');
-
     if (voiceEnabled && answer) speak(answer);
   } catch (e) {
     setAnswer('Errore: ' + e.message, true);
@@ -431,6 +478,47 @@ async function capture() {
     btnCapture.classList.remove('loading');
     scanLine.classList.remove('scanning');
   }
+}
+
+// ─── Chiamata API con slide intera + ogni risposta zoomata individualmente ────
+async function askClaudeMulti(fullB64, strips) {
+  const content = [
+    { type: 'text', text: 'Questa è la slide completa:' },
+    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fullB64 } },
+    { type: 'text', text: 'Queste sono le singole risposte ingrandite (1, 2, 3, 4):' },
+  ];
+  strips.forEach((s, i) => {
+    content.push({ type: 'text', text: `Risposta ${i + 1}:` });
+    content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: s } });
+  });
+  content.push({ type: 'text', text: 'Quale numero è corretto? Rispondi SOLO con il numero.' });
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1000,
+      system:
+        'Sei un esperto di Matematica, Analisi 1 e Analisi 2. ' +
+        'Ricevi una slide con una domanda e le singole risposte ingrandite. ' +
+        'Esegui i calcoli internamente. Rispondi SOLO con il numero dell\'opzione corretta. ' +
+        'Un solo numero, nient\'altro.',
+      messages: [{ role: 'user', content }]
+    })
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data.content.filter(b => b.type === 'text').map(b => b.text).join('').trim();
 }
 
 // ─── Chiamata API Claude Vision ───────────────────────────────────────────────
