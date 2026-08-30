@@ -447,10 +447,12 @@ async function askClaude(imageB64) {
       model: 'claude-sonnet-4-6',
       max_tokens: 250,
       system:
-        'Sei un assistente che risponde a quesiti a risposta multipla. ' +
-        'Ricevi una foto di una slide con una domanda e le opzioni di risposta. ' +
+        'Sei un esperto di Matematica, Analisi 1 e Analisi 2 (limiti, derivate, integrali, serie, equazioni differenziali, funzioni reali). ' +
+        'Ricevi una foto di una slide con una domanda o quesito a risposta multipla. ' +
         'Rispondi SOLO con la lettera dell\'opzione corretta, esempio: "B". ' +
-        'Una sola lettera. Nient\'altro. Nessuna spiegazione, nessun testo aggiuntivo.',
+        'Una sola lettera, nient\'altro. ' +
+        'Se la domanda non ha opzioni ma richiede un risultato, scrivi solo il risultato numerico o simbolico, senza spiegazioni. ' +
+        'Rispondi sempre in italiano. Sii netto e preciso.',
       messages: [{
         role: 'user',
         content: [{
