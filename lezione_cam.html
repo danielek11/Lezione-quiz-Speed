@@ -369,14 +369,30 @@ async function startApp() {
   apiKey = key;
   errEl.textContent = '';
 
-  // Avvia fotocamera
+  // Avvia fotocamera con autofocus continuo
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      video: {
+        facingMode: 'environment',
+        width:  { ideal: 1920 },
+        height: { ideal: 1080 },
+        focusMode:     { ideal: 'continuous' },
+        focusDistance: { ideal: 0 }
+      },
       audio: false
     });
     video.srcObject = stream;
     await video.play();
+
+    // Prova ad applicare autofocus continuo via applyConstraints (Android Chrome)
+    const track = stream.getVideoTracks()[0];
+    if (track && typeof track.applyConstraints === 'function') {
+      try {
+        await track.applyConstraints({
+          advanced: [{ focusMode: 'continuous' }]
+        });
+      } catch (_) { /* dispositivo non supporta, ignoriamo */ }
+    }
   } catch (e) {
     errEl.textContent = 'Fotocamera non disponibile: ' + e.message;
     return;
@@ -395,6 +411,48 @@ function loadVoices() {
   voices.it = all.find(v => v.lang.startsWith('it')) || all[0] || null;
 }
 
+// ─── Rilevamento sfocatura (varianza Laplaciano) ──────────────────────────────
+function sharpness(videoEl) {
+  const w = 320, h = 180; // lavora su thumbnail per velocità
+  const tmp = document.createElement('canvas');
+  tmp.width = w; tmp.height = h;
+  const c = tmp.getContext('2d');
+  c.drawImage(videoEl, 0, 0, w, h);
+  const { data } = c.getImageData(0, 0, w, h);
+
+  // Converti in grigi e applica kernel Laplaciano 3x3
+  const gray = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const p = i * 4;
+    gray[i] = 0.299 * data[p] + 0.587 * data[p+1] + 0.114 * data[p+2];
+  }
+  const kernel = [0,1,0, 1,-4,1, 0,1,0];
+  let sum = 0, sum2 = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      let v = 0;
+      for (let ky = -1; ky <= 1; ky++)
+        for (let kx = -1; kx <= 1; kx++)
+          v += gray[(y+ky)*w+(x+kx)] * kernel[(ky+1)*3+(kx+1)];
+      sum += v; sum2 += v * v; n++;
+    }
+  }
+  const mean = sum / n;
+  return sum2 / n - mean * mean; // varianza
+}
+
+// Attende che il frame sia nitido (max 4 secondi)
+async function waitForFocus(minSharpness = 80, maxWaitMs = 4000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const s = sharpness(video);
+    if (s >= minSharpness) return true;
+    setStatus(`📷 Messa a fuoco… (${Math.round(s)})`, 'loading');
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return false; // timeout, procedi comunque
+}
+
 // ─── Cattura e analisi ────────────────────────────────────────────────────────
 async function capture() {
   if (busy) return;
@@ -405,18 +463,15 @@ async function capture() {
   void flash.offsetWidth;
   flash.classList.add('pop');
 
-  // Snapshot normale 1x
-  canvas.width  = video.videoWidth  || 1280;
-  canvas.height = video.videoHeight || 720;
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const b64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
-
-  // UI → loading
+  // Attendi messa a fuoco prima di scattare
   btnCapture.classList.add('loading');
   scanLine.classList.add('scanning');
-  setStatus('Analisi…', 'loading');
+  const focused = await waitForFocus(80, 4000);
+  if (!focused) {
+    setStatus('⚠️ Fuoco incerto, analizzo comunque…', 'loading');
+  } else {
+    setStatus('Analisi…', 'loading');
+  }
   setAnswer('Lettura slide in corso…', true);
 
   try {
@@ -506,9 +561,11 @@ async function askClaudeMulti(fullB64, strips) {
       max_tokens: 1000,
       system:
         'Sei un esperto di Matematica, Analisi 1 e Analisi 2. ' +
-        'Ricevi una slide con una domanda e le singole risposte ingrandite. ' +
-        'Esegui i calcoli internamente. Rispondi SOLO con il numero dell\'opzione corretta. ' +
-        'Un solo numero, nient\'altro.',
+        'Ricevi una slide con una domanda e le singole opzioni ingrandite nell\'ordine: 1, 2, 3, 4 dall\'alto verso il basso. ' +
+        'REGOLA 1: Ignora qualsiasi selezione, spunta, evidenziazione o colore pre-impostato — potrebbero essere sbagliati. ' +
+        'REGOLA 2: Se le opzioni non sono numerate, usa la posizione visiva: prima opzione = 1, seconda = 2, ecc. ' +
+        'REGOLA 3: Esegui i calcoli internamente. NON scrivere il procedimento. ' +
+        'REGOLA 4: Rispondi SOLO con il numero della posizione dell\'opzione corretta. Nessun testo aggiuntivo.',
       messages: [{ role: 'user', content }]
     })
   });
@@ -536,10 +593,11 @@ async function askClaude(imageB64) {
       max_tokens: 1000,
       system:
         'Sei un esperto di Matematica, Analisi 1 e Analisi 2. ' +
-        'Ricevi una foto di una domanda a risposta multipla numerata. ' +
-        'Esegui tutti i calcoli necessari internamente, ragiona passo dopo passo nella tua testa, ma NON scrivere nulla del procedimento. ' +
-        'Alla fine scrivi SOLO il numero dell\'opzione corretta, esempio: "3". ' +
-        'Assolutamente nessun testo aggiuntivo, nessuna spiegazione, nessuna parola. Solo il numero.',
+        'Ricevi una foto di una domanda con opzioni di risposta. ' +
+        'REGOLA 1: Ignora completamente qualsiasi selezione, spunta, evidenziazione o colore che suggerisca una risposta già scelta — quella potrebbe essere sbagliata. ' +
+        'REGOLA 2: Se le opzioni non sono numerate, assegnale tu la posizione in base all\'ordine visivo dall\'alto verso il basso: la prima opzione = 1, la seconda = 2, e così via. ' +
+        'REGOLA 3: Esegui tutti i calcoli internamente. NON scrivere il procedimento. ' +
+        'REGOLA 4: Rispondi SOLO con il numero della posizione dell\'opzione corretta (1, 2, 3 o 4). Nessuna parola, nessun testo aggiuntivo. Solo il numero.',
       messages: [{
         role: 'user',
         content: [{
