@@ -474,6 +474,14 @@ async function capture() {
   }
   setAnswer('Lettura slide in corso…', true);
 
+  // Snapshot normale 1x
+  canvas.width  = video.videoWidth  || 1280;
+  canvas.height = video.videoHeight || 720;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const b64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+
   try {
     let answer = await askClaude(b64);
 
